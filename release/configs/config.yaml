@@ -1,0 +1,178 @@
+# ==============================================================================
+# Pipeline-Latent Mismatch — Unified Configuration
+# Aligned with Manuscript v2.3 primary configuration (IEEE Access submission)
+# ==============================================================================
+# Paths use forward slashes for cross-platform compatibility.
+# Replace ROOT_DIR with your local project root.
+# ==============================================================================
+
+ROOT_DIR: './project_root'
+
+PATHS:
+  # ---- Input data ----
+  raw_data_dir: 'raw_data'
+  real_folds_dir: 'raw_data/real_folds'           # 10-fold stratified splits of Arirang cohort
+  nhanes_folds_dir: 'raw_data/real_nhanes_folds'  # NHANES 2017-2018 external evaluation folds
+
+  # ---- Experiment condition (sub-folder name under fidelity/utility) ----
+  experiment_condition: 'Arirang_All_vars'
+  # Alternatives for 3-stage ablation (Section III-E):
+  #   Arirang_Non_HK   — 24 features, no head-tail split (Stage 0)
+  #   Arirang_3_HK     — 27 features, split on crtn_s/ins_s/tbil_s (Stage 1)
+  #   Arirang_All_vars — 31 features, full 7-HK split (Stage 2, primary)
+
+  # ---- Fidelity outputs ----
+  fidelity_root: 'evaluation/fidelity'
+  fidelity_model: 'tabDDPM'    # Override per-script: 'tabDDPM' or 'cvae'
+
+  # ---- Utility (TSTR) outputs ----
+  utility_root: 'evaluation/utility'
+  utility_model: 'tabDDPM'
+  utility_internal_prefix: 'internal'
+  utility_external_prefix: 'external_NHANES'
+
+  # ---- Sub-folder names ----
+  subdir_univariate: 'eval_univariate'
+  subdir_multivariate: 'eval_multivariate'
+  subdir_generated: 'generated_data'
+
+# ==============================================================================
+# Cross-validation protocol (Section III-A)
+# ==============================================================================
+SEEDS: [42, 52, 62, 72, 82]   # 5 seeds
+KFOLD_N: 10                   # 10-fold stratified
+TARGET_LABELS: ['is_mi', 'is_stroke']
+COND_VARS:    ['is_mi', 'is_stroke']
+DROP_COLS:    ['p_id', 'ptn_seq']
+
+# ------------------------------------------------------------------------------
+# Global scaler fitting policy
+# ------------------------------------------------------------------------------
+# 'all_folds'  : Fit the four baseline scalers (Standard, Quantile, Robust,
+#                Power) once on the concatenation of every fold, then reuse.
+#                This matches how the manuscript's reported runs were produced.
+#                Acceptable because the same pre-fit is shared by every scaler
+#                condition, so relative comparisons (the manuscript's central
+#                results) are not biased.
+# 'train_only' : Re-fit baseline scalers inside each fold loop on the training
+#                folds only (strict, leakage-free). Use for a fully auditable
+#                run; expect small numerical shifts in absolute values.
+GLOBAL_SCALER_FIT: 'all_folds'
+
+# ==============================================================================
+# Scaler selection
+# ==============================================================================
+SCALERS: ['standard', 'quantile', 'robust', 'power', 'adaptive']
+# For Adaptive alpha-sweep run, set:
+#   SCALERS: ['adaptive']
+#   ENABLE_ALPHA_SWEEP: true
+
+# ==============================================================================
+# Adaptive scaler parameters (Eqs. 5-7, Section III-B-2)
+# ==============================================================================
+# Default partition: P97.5 (midpoint between P95 outlier cutoff and P99 tail boundary)
+base_tail_quantile: 0.975     # Hard tail threshold
+mix_low_quantile:   0.95      # Linear-mix transition start (P95)
+mix_high_quantile:  0.99      # Linear-mix transition end   (P99)
+log_alpha: 0.3                # Tail-region log compression strength α ∈ [0, 1]
+
+# Numerical inverse refinement (Newton-style)
+inv_max_iter: 30
+inv_tol: 1.0e-8
+
+# Tail-loss weight scalar — kept at 1.0 for primary runs (no priority weighting)
+w_tail: 1.0
+
+# Sensitivity experiments
+ENABLE_ALPHA_SWEEP: false
+ALPHA_SWEEP: [0.0, 0.1, 0.3, 0.5, 0.7, 1.0]   # Section IV-B / Appendix Table B1
+
+# Partition-threshold sensitivity (P95 / P97.5 / P99) — switch base_tail_quantile
+# and proportionally adjust mix_low/mix_high to keep partition-centered transitions.
+
+# ==============================================================================
+# Generative model: TabDDPM (Section III-C primary)
+# ==============================================================================
+# Architecture: MLP, 512-512 hidden, 200 diffusion steps
+# Optimizer:    Adam, lr=1e-4
+# Schedule:     β linear 1e-4 → 2e-2
+# Training:     2000 epochs, batch_size 512
+TABDDPM:
+  d_layers: [512, 512]
+  diffusion_steps: 200
+  epochs: 2000
+  batch_size: 512
+  lr: 0.0001
+  beta_start: 0.0001
+  beta_end: 0.02
+  time_emb_dim: 32
+  dropout: 0.1
+  weight_decay: 0.00001
+  # Reconstruction weight applied to samples at-or-above the P97.5 tail
+  # threshold of any HK variable. Set to 1.0 to disable the weighting.
+  # The 2.5× default matches the run that produced the manuscript's
+  # reported numbers (Section III-C, training paragraph).
+  tail_weight: 2.5
+
+# ==============================================================================
+# Generative model: CVAE (Section III-C secondary)
+# ==============================================================================
+# Architecture: 3-layer MLP encoder/decoder, hidden 256 (256-256-128 in manuscript wording),
+#               latent_dim 64, LayerNorm, dropout 0.1
+# Loss:         Huber recon (δ=1.5) + β * KL,  β = 0.01
+# Optimizer:    Adam, lr=1e-3, weight_decay 1e-5
+# Training:     2000 epochs, batch_size 512
+CVAE:
+  hidden_dim: 256
+  depth: 3
+  latent_dim: 64
+  norm_type: 'layer'
+  dropout: 0.1
+  delta: 1.5
+  beta: 0.01
+  epochs: 2000
+  batch_size: 512
+  lr: 0.001
+  weight_decay: 0.00001
+  # See TABDDPM.tail_weight above; the same setting applies to the CVAE
+  # Huber reconstruction term.
+  tail_weight: 2.5
+
+# ---- CVAE Capacity Ablation (Appendix Table C3) ----
+# To run the ablation, override CVAE.hidden_dim to 128 (~70% parameter reduction):
+#   CVAE: { hidden_dim: 128, latent_dim: 64, batch_size: 512, ... }
+
+# ---- CVAE KL Reweighting Sweep (β ∈ {0.05, 0.1, 0.5, 1.0}) ----
+# Use latent_dim=32, hidden_dim=256, batch_size=512 per manuscript Section III-C.
+
+# ==============================================================================
+# Preprocessing (head-tail split for HK variables)
+# ==============================================================================
+preprocessing:
+  # Seven HK variables (Table I): population kurtosis > 100
+  split_quantile_features:
+    - acr_ur     # Urine Albumin / Creatinine Ratio (κ=553.9, TTR=52.55)
+    - malb_ur    # Microalbuminuria               (κ=454.0, TTR=78.49)
+    - ggt_s      # Gamma-Glutamyl Transferase     (κ=270.7, TTR=12.50)
+    - crtn_s     # Serum Creatinine               (κ=356.1, TTR=1.75)
+    - ins_s      # Fasting Insulin                (κ=186.5, TTR=2.73)
+    - tbil_s     # Total Bilirubin                (κ=119.6, TTR=2.37)
+    - ast_s      # Aspartate Aminotransferase     (κ=114.7, TTR=2.88)
+
+  # 3-stage ablation alternatives (Section III-E):
+  #   Stage 0 (Non-HK):  split_quantile_features: []
+  #   Stage 1 (3-HK):    [crtn_s, ins_s, tbil_s]
+  #   Stage 2 (7-HK):    full list above (default)
+
+# ==============================================================================
+# Evaluation
+# ==============================================================================
+N_BOOTSTRAP: 1000             # Bootstrap CI iterations for TSTR utility
+EQUIV_MARGIN: 0.2             # TOST equivalence margin for SMD
+
+# ==============================================================================
+# Utility (TSTR) classifiers — Section III-D
+# ==============================================================================
+# Four classifiers: XGBoost, LightGBM, RandomForest, LogisticRegression
+# All use class-imbalance handling consistent with positive rates ~3.2% (MI) / ~5.1% (stroke).
+# Per-classifier hyperparameters are fixed defaults (see src/evaluation/utility_tstr.py).
