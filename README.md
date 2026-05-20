@@ -1,8 +1,7 @@
 # Pipeline-Latent Mismatch — Reference Implementation
 
-Reference code accompanying the IEEE Access submission *"The Pipeline-Latent
-Mismatch: Tail-Preserving Preprocessing of High-Kurtosis Clinical Biomarkers
-in Tabular Generative Models."*
+Reference code accompanying the IEEE Access submission *"Tail-Region Failure in Synthetic Clinical 
+                  Data: The Pipeline–Latent Mismatch Undermines High-Risk Subgroup Reconstruction in Tabular Generative Models"*
 
 All hyperparameters and protocol choices are aligned with the manuscript's
 primary configuration. See Section III of the manuscript for the corresponding
@@ -244,6 +243,10 @@ specified in the comments inside `configs/config.yaml`.
 
 ## License and citation
 
-See LICENSE and CITATION.cff (to be added) for citation details.
+This repository is released under the Apache License 2.0 (see LICENSE).
+Citation information will be available in CITATION.cff upon manuscript
+acceptance.
+
 The Arirang cohort data are not redistributed with this repository. NHANES
-data are downloadable from https://www.cdc.gov/nchs/nhanes/.
+2017-2018 data are downloadable from the U.S. CDC at:
+https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/default.aspx?BeginYear=2017
